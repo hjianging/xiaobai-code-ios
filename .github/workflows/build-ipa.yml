@@ -1,0 +1,85 @@
+name: build-ipa
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework_run_id:
+        description: NodeMobile 框架构建所在的 run id
+        required: true
+      bundle_asset_id:
+        description: bundle.zip 的 release asset id
+        required: true
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download NodeMobile.framework
+        uses: actions/download-artifact@v4
+        with:
+          name: NodeMobile-ios-arm64
+          run-id: ${{ inputs.framework_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: app/Frameworks
+
+      - name: Show framework
+        run: |
+          find app/Frameworks -maxdepth 3 | head -40
+          ls -la app/Frameworks/NodeMobile.framework || true
+
+      - name: Download runtime bundle
+        run: |
+          set -e
+          mkdir -p app/Resources/bundle
+          curl -sSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/octet-stream" \
+               "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ inputs.bundle_asset_id }}" \
+               -o /tmp/bundle.zip
+          ls -lh /tmp/bundle.zip
+          unzip -q /tmp/bundle.zip -d app/Resources/bundle
+          du -sh app/Resources/bundle
+          ls app/Resources/bundle
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: app
+        run: xcodegen generate && cat XiaobaiCode.xcodeproj/project.pbxproj | head -20
+
+      - name: Build (unsigned)
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project XiaobaiCode.xcodeproj \
+            -scheme XiaobaiCode \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tail -80
+
+      - name: Package ipa
+        run: |
+          set -e
+          APP=$(find app/build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          echo "app = $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          du -sh Payload
+          zip -qry "xiaobai-code-1.4.1-ios-unsigned.ipa" Payload
+          ls -lh *.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: '*.ipa'
+          if-no-files-found: error

@@ -18,19 +18,37 @@ jobs:
           xcodebuild -version
           python3 --version
           clang --version | head -1
+          sysctl -n hw.ncpu hw.memsize
+          df -h /
 
       - name: Build iOS arm64 device framework
         working-directory: node
         run: |
+          # 3 核 / 7 GB 的 runner 上 V8 并行编译容易触发内核内存回收，降到 2 并发
+          sed -i '' 's/-j$(getconf _NPROCESSORS_ONLN)/-j2/g' tools/ios_framework_prepare.sh
+          grep -n "make -j" tools/ios_framework_prepare.sh
           ./tools/ios_framework_prepare.sh arm64
 
+      - name: Diagnose host tool
+        if: failure()
+        working-directory: node
+        run: |
+          ls -la out/Release/obj.host/node_js2c/ || true
+          file out/Release/obj.host/node_js2c/node_js2c || true
+          codesign -dv out/Release/obj.host/node_js2c/node_js2c || true
+          otool -l out/Release/obj.host/node_js2c/node_js2c | head -40 || true
+          out/Release/obj.host/node_js2c/node_js2c || echo "run exit=$?"
+          vm_stat | head -8
+
       - name: Locate framework
+        if: success()
         run: |
           find node/out_ios_arm64 -maxdepth 4 -name "NodeMobile.framework" -print -exec du -sh {} \;
           ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework || true
           ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework/Headers || true
 
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: NodeMobile-ios-arm64
           path: node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework

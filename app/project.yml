@@ -1,0 +1,62 @@
+name: XiaobaiCode
+
+options:
+  bundleIdPrefix: com.xiaobai
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+
+targets:
+  XiaobaiCode:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Resources/Assets.xcassets
+      - path: Resources/bundle
+        type: folder
+      - path: Frameworks/NodeMobile.framework
+        embed: false
+    settings:
+      base:
+        PRODUCT_NAME: XiaobaiCode
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaobai.code
+        MARKETING_VERSION: "1.4.1"
+        CURRENT_PROJECT_VERSION: "141"
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging-Header.h
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(PROJECT_DIR)/Frameworks
+        OTHER_LDFLAGS: $(inherited) -ObjC -lc++
+        ENABLE_BITCODE: "NO"
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: 小白code
+        CFBundleName: XiaobaiCode
+        CFBundleShortVersionString: "1.4.1"
+        CFBundleVersion: "141"
+        LSRequiresIPhoneOS: true
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoadsInWebContent: true
+          NSAllowsLocalNetworking: true
