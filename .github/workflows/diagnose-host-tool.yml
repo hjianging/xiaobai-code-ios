@@ -1,0 +1,56 @@
+name: diagnose-host-tool
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        run: |
+          git clone --depth 1 --branch update22-9-0 https://github.com/nodejs-mobile/nodejs-mobile.git node
+          cd node && git log -1 --oneline
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          python3 --version
+          uname -m
+          sysctl -n hw.ncpu hw.memsize
+
+      - name: Probe default (script flags)
+        working-directory: node
+        run: |
+          set -x
+          python3 -m venv .
+          source bin/activate
+          python -m pip install --quiet setuptools
+          export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
+          ./configure --dest-os=ios --dest-cpu=arm64 --with-intl=none --cross-compiling \
+            --enable-static --openssl-no-asm --v8-options=--jitless \
+            --without-node-code-cache --without-node-snapshot
+          grep -E "want_separate_host_toolset|host_arch|target_arch|target_os" config.gypi || true
+          make -j2 out/Release/node_js2c || true
+          ls -la out/Release/node_js2c || true
+          file out/Release/node_js2c || true
+          otool -l out/Release/node_js2c 2>/dev/null | grep -A6 -E "LC_BUILD_VERSION|LC_VERSION_MIN" | head -30 || true
+          codesign -dv out/Release/node_js2c 2>&1 | head -10 || true
+          ./out/Release/node_js2c || echo "run exit=$?"
+
+      - name: Probe with separate host toolset
+        working-directory: node
+        run: |
+          set -x
+          source bin/activate
+          make clean || true
+          export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios want_separate_host_toolset=1"
+          ./configure --dest-os=ios --dest-cpu=arm64 --with-intl=none --cross-compiling \
+            --enable-static --openssl-no-asm --v8-options=--jitless \
+            --without-node-code-cache --without-node-snapshot
+          grep -E "want_separate_host_toolset" config.gypi || true
+          make -j2 out/Release/node_js2c || true
+          file out/Release/node_js2c || true
+          otool -l out/Release/node_js2c 2>/dev/null | grep -A6 -E "LC_BUILD_VERSION" | head -20 || true
+          ./out/Release/node_js2c || echo "run exit=$?"
