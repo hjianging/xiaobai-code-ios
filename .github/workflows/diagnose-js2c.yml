@@ -1,0 +1,36 @@
+name: diagnose-js2c
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        run: |
+          git clone --depth 1 --branch update22-9-0 https://github.com/nodejs-mobile/nodejs-mobile.git node
+          cd node && git log -1 --oneline
+
+      - name: Build and inspect host tool (single job)
+        working-directory: node
+        run: |
+          set -x
+          python3 -m venv .
+          source bin/activate
+          python -m pip install --quiet setuptools
+          export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
+          ./configure --dest-os=ios --dest-cpu=arm64 --with-intl=none --cross-compiling \
+            --enable-static --openssl-no-asm --v8-options=--jitless \
+            --without-node-code-cache --without-node-snapshot
+          vm_stat | head -6
+          ulimit -a
+          make -j1 out/Release/obj/gen/node_javascript.cc || true
+          ls -la out/Release/node_js2c || true
+          file out/Release/node_js2c || true
+          otool -l out/Release/node_js2c 2>/dev/null | grep -A6 "LC_BUILD_VERSION" | head -20 || true
+          codesign -dv out/Release/node_js2c 2>&1 | head -8 || true
+          ./out/Release/node_js2c || echo "run exit=$?"
+          ls -la out/Release/obj/gen/node_javascript.cc || true
+          vm_stat | head -6
