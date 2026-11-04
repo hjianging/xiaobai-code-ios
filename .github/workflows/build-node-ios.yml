@@ -1,0 +1,37 @@
+name: build-node-ios
+
+on:
+  workflow_dispatch:
+
+jobs:
+  framework:
+    runs-on: macos-14
+    timeout-minutes: 350
+    steps:
+      - name: Checkout nodejs-mobile (Node 22.9.0)
+        run: |
+          git clone --depth 1 --branch update22-9-0 https://github.com/nodejs-mobile/nodejs-mobile.git node
+          cd node && git log -1 --oneline
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          python3 --version
+          clang --version | head -1
+
+      - name: Build iOS arm64 device framework
+        working-directory: node
+        run: |
+          ./tools/ios_framework_prepare.sh arm64
+
+      - name: Locate framework
+        run: |
+          find node/out_ios_arm64 -maxdepth 4 -name "NodeMobile.framework" -print -exec du -sh {} \;
+          ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework || true
+          ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework/Headers || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NodeMobile-ios-arm64
+          path: node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
+          if-no-files-found: error
