@@ -2,9 +2,10 @@
 # 构建 Node 22.9.0 的 iOS 真机 arm64 静态 framework。
 #
 # 为什么不用上游 tools/ios_framework_prepare.sh：
-#   它在 macOS arm64 宿主上会把 node_js2c（宿主工具）用 iPhoneOS SDK 链接，
-#   产物是 iOS 可执行文件，macOS 内核会直接 SIGKILL（Killed: 9）。
-#   这里先跑一遍 make 生成全部依赖，再把「宿主工具」的链接参数改成 macOS SDK，然后继续 make。
+#   在 arm64 macOS 宿主上，gyp 会把「宿主工具链」（out/Release/node_js2c、
+#   torque 等，编到 obj.host 下）也套上 iPhoneOS SDK，产物是 iOS 可执行文件，
+#   macOS 内核会直接 SIGKILL（Killed: 9 → make Error 137）。
+#   这里用 ci/hostshim 下的编译器垫片，把宿主工具的编译/链接参数换回 macOS SDK。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -34,40 +35,18 @@ export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
   --without-node-code-cache \
   --without-node-snapshot
 
-echo "== 第一遍 make（预计在 node_js2c 处被 kill，这里忽略） =="
-make -j2 || true
-
-echo "== 把宿主工具的链接改成 macOS SDK =="
+echo "== 挂上宿主工具编译器垫片 =="
 export MACSDK
 MACSDK=$(xcrun --sdk macosx --show-sdk-path)
-python3 - <<'PY'
-import glob, os, re, pathlib
-macsdk = os.environ["MACSDK"]
-changed = []
-for p in sorted(set(glob.glob("out/*.mk") + ["out/Makefile"])):
-    f = pathlib.Path(p)
-    if not f.exists():
-        continue
-    lines = f.read_text().splitlines(True)
-    hit = False
-    out = []
-    for ln in lines:
-        if "node_js2c" in ln and "-isysroot" in ln:
-            ln = ln.replace("-Wl,-no_pie ", "")
-            ln = re.sub(r"-miphoneos-version-min=[0-9.]+", "", ln)
-            ln = re.sub(r"-isysroot [^ ]*iPhoneOS[^ ]*",
-                        "-isysroot %s -mmacosx-version-min=11" % macsdk, ln)
-            hit = True
-        out.append(ln)
-    if hit:
-        f.write_text("".join(out))
-        changed.append(p)
-print("patched:", changed)
-PY
+echo "MACSDK=$MACSDK"
+SHIM="$(cd .. && pwd)/ci/hostshim"
+chmod +x "$SHIM"/*
+export PATH="$SHIM:$PATH"
+echo "which g++: $(command -v g++)"
+echo "which gcc: $(command -v gcc)"
+echo "which c++: $(command -v c++)"
 
-grep -n "node_js2c" out/*.mk 2>/dev/null | grep -i "isysroot" | head -3 || true
-
-echo "== 第二遍 make =="
+echo "== make（目标 iOS arm64，宿主工具走 macOS SDK） =="
 make -j2
 
 echo "== 收集静态库 =="

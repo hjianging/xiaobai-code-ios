@@ -1,0 +1,63 @@
+#!/bin/bash
+# 宿主工具（obj.host / node_js2c / torque 等）的编译器垫片。
+#
+# 背景：在 arm64 macOS 上交叉编译 iOS 时，gyp 会给「宿主工具链」也套上
+#   -isysroot ...iPhoneOS17.5.sdk -miphoneos-version-min=14.0 -fembed-bitcode
+# 于是 out/Release/node_js2c 被链成 iOS 可执行文件，macOS 内核直接 Killed: 9。
+#
+# 这里把「编译产物落在 obj.host 下」或「输出是宿主工具」的调用，参数换回 macOS SDK。
+# 其它调用原样透传给真实编译器。
+#
+# 用法：rewrite <编译器名> <参数...>（由同目录下的 g++ / gcc / c++ / cc / clang 调起）
+name="$1"
+shift
+
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+
+rewrite=0
+case "$out" in
+  */obj.host/*) rewrite=1 ;;
+  */node_js2c|*/torque|*/torque-language-server|*/mksnapshot|*/node_mksnapshot|*/gen-regexp-special-case) rewrite=1 ;;
+esac
+
+if [ "$rewrite" = "0" ]; then
+  exec "/usr/bin/$name" "$@"
+fi
+
+: "${MACSDK:?MACSDK 未设置（应为 xcrun --sdk macosx --show-sdk-path）}"
+
+ARGS=()
+skip=0
+for a in "$@"; do
+  if [ "$skip" = "1" ]; then skip=0; continue; fi
+  case "$a" in
+    -isysroot)
+      ARGS[${#ARGS[@]}]="-isysroot"
+      ARGS[${#ARGS[@]}]="$MACSDK"
+      skip=1
+      continue
+      ;;
+    -isysroot=*)
+      ARGS[${#ARGS[@]}]="-isysroot"
+      ARGS[${#ARGS[@]}]="$MACSDK"
+      continue
+      ;;
+    -miphoneos-version-min=*|-mios-version-min=*|-mios-simulator-version-min=*)
+      continue
+      ;;
+    -fembed-bitcode*)
+      continue
+      ;;
+    -Wl,-no_pie|-Wl,-ios_version_min*|-Wl,-iphoneos_version_min*)
+      continue
+      ;;
+  esac
+  ARGS[${#ARGS[@]}]="$a"
+done
+
+exec "/usr/bin/$name" "${ARGS[@]}"
