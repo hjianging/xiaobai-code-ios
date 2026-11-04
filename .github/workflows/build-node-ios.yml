@@ -5,40 +5,55 @@ on:
 
 jobs:
   framework:
-    runs-on: macos-14
+    # 上游 CI 同样指定 macos-13 + Xcode 15.2 构建 iOS 真机包；
+    # arm64 宿主（macos-14）上交叉编译时宿主工具 node_js2c 会被内核 SIGKILL
+    runs-on: macos-13
     timeout-minutes: 350
+    env:
+      XCODE_VERSION: 15.2
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /Library/Frameworks/Mono.framework || true
+          sudo rm -rf /Library/Frameworks/Xamarin.iOS.framework || true
+          sudo rm -rf /Library/Frameworks/Xamarin.Android.framework || true
+          sudo rm -rf /Users/runner/Library/Android || true
+          sudo find /Applications -type d -name "Xcode_*.app" ! -name "Xcode_15.2.app" -prune -exec rm -rf "{}" \; || true
+          df -h /
+
       - name: Checkout nodejs-mobile (Node 22.9.0)
         run: |
           git clone --depth 1 --branch update22-9-0 https://github.com/nodejs-mobile/nodejs-mobile.git node
           cd node && git log -1 --oneline
 
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.2'
+
       - name: Toolchain info
         run: |
           xcodebuild -version
           python3 --version
-          clang --version | head -1
           sysctl -n hw.ncpu hw.memsize
-          df -h /
 
       - name: Build iOS arm64 device framework
         working-directory: node
         run: |
-          # 3 核 / 7 GB 的 runner 上 V8 并行编译容易触发内核内存回收，降到 2 并发
-          sed -i '' 's/-j$(getconf _NPROCESSORS_ONLN)/-j2/g' tools/ios_framework_prepare.sh
-          grep -n "make -j" tools/ios_framework_prepare.sh
+          # configure.py 会选 Python 3.12，而 3.12 没有 distutils（node-gyp#2869），上游用 venv + setuptools 兜住
+          python3.12 -m venv . || python3 -m venv .
+          source bin/activate
+          python -m pip install --quiet setuptools
           ./tools/ios_framework_prepare.sh arm64
 
       - name: Diagnose host tool
         if: failure()
         working-directory: node
         run: |
-          ls -la out/Release/obj.host/node_js2c/ || true
-          file out/Release/obj.host/node_js2c/node_js2c || true
-          codesign -dv out/Release/obj.host/node_js2c/node_js2c || true
-          otool -l out/Release/obj.host/node_js2c/node_js2c | head -40 || true
-          out/Release/obj.host/node_js2c/node_js2c || echo "run exit=$?"
-          vm_stat | head -8
+          ls -la out/Release/node_js2c || true
+          file out/Release/node_js2c || true
+          codesign -dv out/Release/node_js2c || true
+          out/Release/node_js2c || echo "run exit=$?"
 
       - name: Locate framework
         if: success()
