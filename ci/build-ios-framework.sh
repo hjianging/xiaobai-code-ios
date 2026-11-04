@@ -23,6 +23,16 @@ source bin/activate
 python -m pip install --quiet --upgrade pip setuptools
 
 echo "== configure =="
+# 关掉调试信息：Release 默认 -gdwarf-2，host/target 两套对象会把 14GB 的 runner 盘撑爆
+python3 - <<'PY'
+import pathlib
+p = pathlib.Path("common.gypi")
+s = p.read_text()
+n = s.count("'-gdwarf-2'")
+p.write_text(s.replace("'-gdwarf-2'", "'-g0'"))
+print("debug flags replaced:", n)
+PY
+
 export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
 ./configure \
   --dest-os=ios \
@@ -47,7 +57,20 @@ echo "which gcc: $(command -v gcc)"
 echo "which c++: $(command -v c++)"
 
 echo "== make（目标 iOS arm64，宿主工具走 macOS SDK） =="
+# 每 3 分钟打一行磁盘/内存：万一再被 runner 掐断，能看出是不是盘满了
+(
+  while true; do
+    sleep 180
+    echo "[monitor] $(date +%H:%M:%S) disk=$(df -h / | tail -1 | awk '{print $4}') free, out=$(du -sh out 2>/dev/null | cut -f1)"
+  done
+) &
+MON_PID=$!
+trap 'kill $MON_PID 2>/dev/null || true' EXIT
+
 make -j2
+
+kill $MON_PID 2>/dev/null || true
+df -h /
 
 echo "== 收集静态库 =="
 BIN=tools/ios-framework/bin
