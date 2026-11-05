@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download NodeMobile.framework
+      - name: Download Node libs
         uses: actions/download-artifact@v4
         with:
           name: NodeMobile-ios-arm64
@@ -25,10 +25,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: app/Frameworks
 
-      - name: Show framework
+      - name: Show libs
         run: |
-          find app/Frameworks -maxdepth 3 | head -40
-          ls -la app/Frameworks/NodeMobile.framework || true
+          ls app/Frameworks/libs | head -40
+          echo "count = $(ls app/Frameworks/libs | wc -l)"
+          lipo -info app/Frameworks/libs/libnode.a || true
 
       - name: Download runtime bundle
         run: |

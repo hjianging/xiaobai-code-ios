@@ -73,34 +73,23 @@ kill $MON_PID 2>/dev/null || true
 df -h /
 
 echo "== 收集静态库 =="
-BIN=tools/ios-framework/bin
-mkdir -p "$BIN"
-LIBS="libada.a libbase64.a libbrotli.a libcares.a libgtest_main.a libgtest.a libhistogram.a \
-libllhttp.a libnghttp2.a libnghttp3.a libngtcp2.a libnode.a libopenssl.a libsimdutf.a \
-libuv.a libuvwasi.a libv8_base_without_compiler.a libv8_compiler.a libv8_initializers.a \
-libv8_libbase.a libv8_libplatform.a libv8_snapshot.a libv8_zlib.a libzlib.a \
-libbase64_neon64.a libzlib_inflate_chunk_simd.a"
-for lib in $LIBS; do
-  cp "out/Release/$lib" "$BIN/$lib"
-done
+# 不再用上游的 NodeMobile.xcodeproj：它是给旧版 Node 写的，库名（libbase64*.a 等）
+# 在 22.9.0 里已经没了。这里直接收集 make 产出的真机静态库，交给 App 端链接。
+DIST=dist
+rm -rf "$DIST"
+mkdir -p "$DIST/libs"
+cp out/Release/lib*.a "$DIST/libs/"
+rm -f "$DIST/libs/libgtest.a" "$DIST/libs/libgtest_main.a"
+ls -l "$DIST/libs" | tail -n +2 | awk '{print $5, $9}'
+echo "libs = $(ls "$DIST/libs" | wc -l)"
 
-echo "== 去掉 x64 专用库引用后构建 framework =="
-PBX=tools/ios-framework/NodeMobile.xcodeproj/project.pbxproj
-cp "$PBX" "$PBX.bak"
-for lib in libbase64_avx.a libbase64_avx2.a libbase64_sse41.a libbase64_sse42.a libbase64_ssse3.a; do
-  grep -vF "$lib" "$PBX" > "$PBX.tmp"
-  mv "$PBX.tmp" "$PBX"
-done
-
-xcodebuild build \
-  -project tools/ios-framework/NodeMobile.xcodeproj \
-  -target NodeMobile \
-  -configuration Release \
-  -arch arm64 \
-  -sdk iphoneos \
-  SYMROOT="$(pwd)/out_ios_arm64/iphoneos-arm64"
-
-mv "$PBX.bak" "$PBX"
+echo "== 校验入口符号 node::Start =="
+if ! nm -gU "$DIST/libs/libnode.a" 2>/dev/null | grep -q "_ZN4node5StartEiPPc"; then
+  echo "!! libnode.a 里没有 node::Start"
+  nm -gU "$DIST/libs/libnode.a" 2>/dev/null | grep -i "Start" | head -5 || true
+  exit 1
+fi
+echo "node::Start OK"
 
 echo "== 完成 =="
-find out_ios_arm64 -maxdepth 4 -name "NodeMobile.framework" -print -exec du -sh {} \;
+du -sh "$DIST"

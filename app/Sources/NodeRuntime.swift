@@ -86,7 +86,7 @@ final class NodeRuntime {
 
             let args = ["node", "--expose-internals", entry]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
-            _ = node_start(Int32(cArgs.count), &cArgs)
+            _ = xiaobai_node_start(Int32(cArgs.count), &cArgs)
             for pointer in cArgs { free(pointer) }
         }
     }

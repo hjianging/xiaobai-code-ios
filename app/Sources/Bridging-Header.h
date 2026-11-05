@@ -1,1 +1,1 @@
-#import <NodeMobile/NodeMobile.h>
+#import "NodeBridge.h"

@@ -51,13 +51,14 @@ jobs:
       - name: Locate framework
         if: success()
         run: |
-          find node/out_ios_arm64 -maxdepth 4 -name "NodeMobile.framework" -print -exec du -sh {} \;
-          ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework || true
-          ls -la node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework/Headers || true
+          ls -la node/dist/libs | head -40
+          echo "count = $(ls node/dist/libs | wc -l)"
+          du -sh node/dist
+          lipo -info node/dist/libs/libnode.a
 
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: NodeMobile-ios-arm64
-          path: node/out_ios_arm64/iphoneos-arm64/Release-iphoneos/NodeMobile.framework
+          path: node/dist
           if-no-files-found: error
