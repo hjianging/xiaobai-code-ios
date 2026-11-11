@@ -5,7 +5,7 @@ on:
 
 jobs:
   framework:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -22,17 +22,17 @@ jobs:
           sysctl -n hw.ncpu hw.memsize
           df -h /
 
-      # macos-14 标准 runner 只有 ~14GB 盘，Node+V8 的 host/target 两套产物会撑爆，
-      # 删掉用不到的平台与模拟器缓存腾地方（真机 framework 只需要 iPhoneOS + macOS SDK）。
+      # 标准 runner 盘不大，Node+V8 的 host/target 两套产物会撑爆，
+      # 删掉用不到的平台与模拟器缓存腾地方（真机静态库只需要 iPhoneOS + macOS SDK）。
       - name: Free up disk space
         run: |
           df -h /
-          sudo rm -rf "/Applications/Xcode_15.4.app/Contents/Developer/Platforms/iPhoneSimulator.platform" || true
-          sudo rm -rf "/Applications/Xcode_15.4.app/Contents/Developer/Platforms/WatchOS.platform" || true
-          sudo rm -rf "/Applications/Xcode_15.4.app/Contents/Developer/Platforms/WatchSimulator.platform" || true
-          sudo rm -rf "/Applications/Xcode_15.4.app/Contents/Developer/Platforms/AppleTVOS.platform" || true
-          sudo rm -rf "/Applications/Xcode_15.4.app/Contents/Developer/Platforms/AppleTVSimulator.platform" || true
-          sudo rm -rf "/Library/Developer/CoreSimulator" || true
+          DEV="$(xcode-select -p)"
+          echo "DEV=$DEV"
+          for p in iPhoneSimulator WatchOS WatchSimulator AppleTVOS AppleTVSimulator; do
+            sudo rm -rf "$DEV/Platforms/$p.platform" || true
+          done
+          sudo rm -rf /Library/Developer/CoreSimulator || true
           sudo rm -rf "$HOME/Library/Developer/CoreSimulator" || true
           sudo rm -rf "$HOME/Library/Developer/Xcode/DerivedData" || true
           sudo rm -rf "$HOME/Library/Android" /usr/local/lib/android || true
