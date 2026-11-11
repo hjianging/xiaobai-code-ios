@@ -23,16 +23,6 @@ source bin/activate
 python -m pip install --quiet --upgrade pip setuptools
 
 echo "== configure =="
-# 关掉调试信息：Release 默认 -gdwarf-2，host/target 两套对象会把 14GB 的 runner 盘撑爆
-python3 - <<'PY'
-import pathlib
-p = pathlib.Path("common.gypi")
-s = p.read_text()
-n = s.count("'-gdwarf-2'")
-p.write_text(s.replace("'-gdwarf-2'", "'-g0'"))
-print("debug flags replaced:", n)
-PY
-
 export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
 ./configure \
   --dest-os=ios \
@@ -44,6 +34,12 @@ export GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
   --v8-options=--jitless \
   --without-node-code-cache \
   --without-node-snapshot
+
+echo "== 去掉调试信息与 bitcode =="
+# Release 默认 -O3 -gdwarf-2 -fembed-bitcode：host/target 两套对象合计 17GB，
+# 光 libv8_base_without_compiler.a 就 8.3GB。我们要的只是可链接的静态库。
+perl -pi -e 's/-gdwarf-2/-g0/g; s/-fembed-bitcode//g' out/*.mk out/Makefile 2>/dev/null || true
+echo "剩余 dwarf 标记文件数: $(grep -l -- '-gdwarf-2' out/*.mk 2>/dev/null | wc -l | tr -d ' ')"
 
 echo "== 挂上宿主工具编译器垫片 =="
 export MACSDK
@@ -84,12 +80,16 @@ ls -l "$DIST/libs" | tail -n +2 | awk '{print $5, $9}'
 echo "libs = $(ls "$DIST/libs" | wc -l)"
 
 echo "== 校验入口符号 node::Start =="
-if ! nm -gU "$DIST/libs/libnode.a" 2>/dev/null | grep -q "_ZN4node5StartEiPPc"; then
+# 注意：grep -q 会在命中后立刻关闭管道，nm 收到 SIGPIPE + pipefail 会把成功误判成失败，
+# 所以这里先落文件再判断。
+nm -gU "$DIST/libs/libnode.a" > /tmp/nm_libnode.txt 2>/dev/null || true
+if grep -q "_ZN4node5StartEiPPc" /tmp/nm_libnode.txt; then
+  echo "node::Start OK"
+else
   echo "!! libnode.a 里没有 node::Start"
-  nm -gU "$DIST/libs/libnode.a" 2>/dev/null | grep -i "Start" | head -5 || true
+  grep -i "5Start" /tmp/nm_libnode.txt | head -10 || true
   exit 1
 fi
-echo "node::Start OK"
 
 echo "== 完成 =="
 du -sh "$DIST"
