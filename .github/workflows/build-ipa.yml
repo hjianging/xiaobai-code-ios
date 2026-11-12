@@ -10,6 +10,10 @@ on:
         description: bundle.zip 的 release asset id
         required: true
 
+permissions:
+  actions: read   # 跨 run 下载 artifact
+  contents: read
+
 jobs:
   ipa:
     runs-on: macos-15
