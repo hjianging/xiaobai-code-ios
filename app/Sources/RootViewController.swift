@@ -267,22 +267,6 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
 
     // MARK: - 上传（相机 / 相册 / 文件）
 
-    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
-        pendingUpload = completionHandler
-        let sheet = UIAlertController(title: "添加附件", message: "图片附件暂不支持，建议用文本或 docx",
-                                      preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "拍照", style: .default) { _ in self.takePhoto() })
-        sheet.addAction(UIAlertAction(title: "从相册选择", style: .default) { _ in self.pickPhotos() })
-        sheet.addAction(UIAlertAction(title: "选择文件", style: .default) { _ in self.pickFiles() })
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in self.finishUpload(nil) })
-        if let pop = sheet.popoverPresentationController {
-            pop.sourceView = view
-            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
-        }
-        present(sheet, animated: true)
-    }
-
     private func finishUpload(_ urls: [URL]?) {
         pendingUpload?(urls)
         pendingUpload = nil
@@ -398,5 +382,25 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
                 self.present(share, animated: true)
             }
         }.resume()
+    }
+}
+
+/// `<input type=file>` 的回调是 iOS 18.4 才新增的；更早的系统里 WKWebView 根本没有文件选择器，
+/// 所以整段放在可用性受控的扩展里，避免低版本编译报错。
+@available(iOS 18.4, *)
+extension RootViewController {
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        pendingUpload = completionHandler
+        let sheet = UIAlertController(title: "添加附件", message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "拍照", style: .default) { _ in self.takePhoto() })
+        sheet.addAction(UIAlertAction(title: "从相册选择", style: .default) { _ in self.pickPhotos() })
+        sheet.addAction(UIAlertAction(title: "选择文件", style: .default) { _ in self.pickFiles() })
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in self.finishUpload(nil) })
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        }
+        present(sheet, animated: true)
     }
 }
