@@ -120,6 +120,7 @@ final class NodeRuntime {
         // node::Start 会一直占用调用线程跑事件循环，必须放到后台线程（不能阻塞 UI）
         DispatchQueue.global(qos: .userInitiated).async {
             setenv("XB_MOBILE", "1", 1)
+            setenv("XB_IOS", "1", 1)
             setenv("XIAOBAI_HOME", homePath, 1)
             setenv("XIAOBAI_DSH_PORT", "3092", 1)
             setenv("GATEWAY_PORT", "3099", 1)
@@ -152,6 +153,14 @@ final class NodeRuntime {
 
     func resetGatewayURL() {
         try? FileManager.default.removeItem(at: home.appendingPathComponent("gateway-url.txt"))
+    }
+
+    /// mobile-boot.mjs 在 iOS 上失败时只写这个文件并挂住线程，不会让 App 闪退
+    func mobileError() -> String? {
+        let f = home.appendingPathComponent("mobile-error.txt")
+        guard let text = try? String(contentsOf: f, encoding: .utf8) else { return nil }
+        let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
     }
 
     func probeHealth(completion: @escaping (Bool) -> Void) {

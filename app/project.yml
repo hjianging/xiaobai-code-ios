@@ -65,6 +65,5 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
           NSAllowsArbitraryLoadsInWebContent: true
           NSAllowsLocalNetworking: true

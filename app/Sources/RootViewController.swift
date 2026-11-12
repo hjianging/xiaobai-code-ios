@@ -15,6 +15,7 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.preferences.isTextInteractionEnabled = true
+        cfg.preferences.javaScriptCanOpenWindowsAutomatically = true   // window.open 交给 createWebViewWith
         let web = WKWebView(frame: .zero, configuration: cfg)
         web.scrollView.bounces = false
         web.scrollView.contentInsetAdjustmentBehavior = .never   // 页面自己用 env(safe-area-inset-*)
@@ -137,7 +138,7 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
                 }
                 self.statusLabel.text = "正在启动本地服务（DSH + 网关）…"
                 NodeRuntime.shared.start()
-                self.startPolling(limit: 120)
+                self.startPolling(limit: 90)
             }
         }
     }
@@ -153,6 +154,14 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
                 self.timer = nil
                 self.statusLabel.text = "正在加载…"
                 self.webView.load(URLRequest(url: url))
+                return
+            }
+            // 启动失败时 mobile-boot.mjs 只写错误文件并挂住线程，直接显示原因
+            if let error = NodeRuntime.shared.mobileError() {
+                self.timer?.invalidate()
+                self.timer = nil
+                self.showFatal("本地服务启动失败")
+                self.detailView.text = error
                 return
             }
             if self.waited >= limit {
@@ -176,17 +185,30 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
         print("[xiaobai] fatal:", message)
     }
 
+    /// 「重试」与 `xiaobai://restart` 共用。
+    ///
+    /// 说明：iOS 上 Node 与 App 同进程，`node::Start` 一旦进入事件循环就无法从外部停掉，
+    /// 所以这里做的是「清入口 + 重新探活 + 重新加载」；只有 Node 线程真的退出了才需要重开 App。
     @objc private func retryTapped() {
         restartButton.isHidden = true
         detailView.isHidden = true
+        overlay.isHidden = false
         statusLabel.textColor = .white
+        statusLabel.text = "正在重启本地服务…"
         spinner.startAnimating()
-        NodeRuntime.shared.resetGatewayURL()
+
         NodeRuntime.shared.probeHealth { ok in
             if ok {
-                self.startPolling(limit: 60)
+                if let s = NodeRuntime.shared.readGatewayURL(), let u = URL(string: s) {
+                    self.overlay.isHidden = true
+                    self.spinner.stopAnimating()
+                    self.webView.load(URLRequest(url: u))
+                } else {
+                    self.startPolling(limit: 30)
+                }
             } else {
-                self.showFatal("本地服务没有响应（127.0.0.1:3099）。请完全退出 App 后重开。")
+                NodeRuntime.shared.resetGatewayURL()
+                self.startPolling(limit: 30)
             }
         }
     }
@@ -246,8 +268,9 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
         let loopback = (host == "127.0.0.1" || host == "localhost")
 
         if loopback {
-            // 导出：/novel/export 交给 URLSession 下载后分享（WKWebView 拿不到 blob）
-            if url.path.hasPrefix("/novel/export") {
+            // 导出/下载：/novel/export 与网关的一次性 /download 交给 URLSession 下载后分享
+            // （WKWebView 的下载代理拿不到 blob，也不给文件名）
+            if url.path.hasPrefix("/novel/export") || url.path.hasPrefix("/download") {
                 decisionHandler(.cancel)
                 downloadExport(url)
                 return
@@ -263,6 +286,58 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
             return
         }
         decisionHandler(.allow)
+    }
+
+    // MARK: - WKUIDelegate：JS 对话框 / window.open
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "好", style: .default) { _ in completionHandler() })
+        DispatchQueue.main.async { self.present(alert, animated: true) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler(true) })
+        DispatchQueue.main.async { self.present(alert, animated: true) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?, initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (String?) -> Void) {
+        let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+        alert.addTextField { field in field.text = defaultText }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(nil) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in
+            completionHandler(alert.textFields?.first?.text)
+        })
+        DispatchQueue.main.async { self.present(alert, animated: true) }
+    }
+
+    /// window.open / target=_blank 默认会被丢掉：本地页面在当前 WebView 打开，
+    /// 导出下载与外部域名分别交给下载任务 / SFSafariViewController。
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard let url = navigationAction.request.url else { return nil }
+        if url.scheme == "xiaobai" {
+            retryTapped()
+            return nil
+        }
+        let host = url.host ?? ""
+        if host == "127.0.0.1" || host == "localhost" {
+            if url.path.hasPrefix("/novel/export") || url.path.hasPrefix("/download") {
+                downloadExport(url)
+            } else {
+                webView.load(URLRequest(url: url))
+            }
+        } else if url.scheme == "http" || url.scheme == "https" {
+            present(SFSafariViewController(url: url), animated: true)
+        }
+        return nil
     }
 
     // MARK: - 上传（相机 / 相册 / 文件）
@@ -392,7 +467,9 @@ extension RootViewController {
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         pendingUpload = completionHandler
-        let sheet = UIAlertController(title: "添加附件", message: nil, preferredStyle: .actionSheet)
+        let sheet = UIAlertController(title: "添加附件",
+                                      message: "图片附件暂不可用（缺 iOS 版 sharp），建议用文本或 docx",
+                                      preferredStyle: .actionSheet)
         sheet.addAction(UIAlertAction(title: "拍照", style: .default) { _ in self.takePhoto() })
         sheet.addAction(UIAlertAction(title: "从相册选择", style: .default) { _ in self.pickPhotos() })
         sheet.addAction(UIAlertAction(title: "选择文件", style: .default) { _ in self.pickFiles() })
