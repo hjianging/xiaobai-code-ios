@@ -140,9 +140,9 @@ final class NodeRuntime {
             let args = ["node", "--expose-internals", "--jitless", entry]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
             cArgs.append(nil)                       // argv 必须以 NULL 结尾
-            bootTrace("node start: \(args.joined(separator: " "))")
+            self.bootTrace("node start: \(args.joined(separator: " "))")
             let code = xiaobai_node_start(Int32(args.count), &cArgs)
-            bootTrace("node exited: \(code)")
+            self.bootTrace("node exited: \(code)")
             for pointer in cArgs where pointer != nil { free(pointer) }
         }
     }
