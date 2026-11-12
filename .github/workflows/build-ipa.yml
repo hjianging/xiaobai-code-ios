@@ -78,10 +78,11 @@ jobs:
           echo "app = $APP"
           mkdir -p Payload
           cp -R "$APP" Payload/
+          VER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist"
           du -sh Payload
-          zip -qry "xiaobai-code-1.5.84-ios-unsigned.ipa" Payload
+          zip -qry "xiaobai-code-${VER}-ios-unsigned.ipa" Payload
           ls -lh *.ipa
 
       - uses: actions/upload-artifact@v4
