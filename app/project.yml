@@ -55,6 +55,8 @@ targets:
         NSCameraUsageDescription: 拍照上传书稿素材需要访问相机
         NSPhotoLibraryUsageDescription: 从相册选择附件需要访问照片
         UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft

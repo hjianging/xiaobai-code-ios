@@ -65,9 +65,18 @@ final class NodeRuntime {
             let firstInstall = !fm.fileExists(atPath: entry.path)
 
             if firstInstall {
-                progress("首次启动：正在解压运行时（约 300MB，请稍候）…")
                 if fm.fileExists(atPath: bundleRoot.path) { try fm.removeItem(at: bundleRoot) }
-                try fm.copyItem(at: seed, to: bundleRoot)
+                try fm.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
+                // 逐项拷贝：这样进度可见，闪退时也能从 boot-trace 看出卡在哪个目录
+                let items = ["runtime", "gateway", "dsh-home", "dsh-home-seed", "mobile-boot.mjs", "mobile.patch.yml"]
+                for (i, item) in items.enumerated() {
+                    let src = seed.appendingPathComponent(item)
+                    guard fm.fileExists(atPath: src.path) else { continue }
+                    progress("首次启动：正在解压运行时（\(i + 1)/\(items.count) \(item)）…")
+                    bootTrace("copy: \(item) begin")
+                    try fm.copyItem(at: src, to: bundleRoot.appendingPathComponent(item))
+                    bootTrace("copy: \(item) done")
+                }
             } else if installed != version {
                 progress("正在升级运行时到 \(version)…")
                 // 只覆盖运行时代码与轻量种子，绝不碰 dsh-home（书稿 / 登录态 / Key 都在里面）
@@ -120,8 +129,11 @@ final class NodeRuntime {
         let tmpPath = tmpDir.path
         let installPath = installRoot.path
 
-        // node::Start 会一直占用调用线程跑事件循环，必须放到后台线程（不能阻塞 UI）
-        DispatchQueue.global(qos: .userInitiated).async {
+        // node::Start 会一直占用调用线程跑事件循环，必须放到后台线程（不能阻塞 UI）。
+        // 注意：GCD 的工作线程栈只有 512KB，V8 初始化会栈溢出直接闪退，
+        // 所以这里用自建 Thread 并把栈放大（nodejs-mobile 也是这么做的）。
+        let thread = Thread { [weak self] in
+            guard let self = self else { return }
             setenv("XB_MOBILE", "1", 1)
             setenv("XB_IOS", "1", 1)
             setenv("XIAOBAI_HOME", homePath, 1)
@@ -145,6 +157,9 @@ final class NodeRuntime {
             self.bootTrace("node exited: \(code)")
             for pointer in cArgs where pointer != nil { free(pointer) }
         }
+        thread.name = "xiaobai-node"
+        thread.stackSize = 16 * 1024 * 1024
+        thread.start()
     }
 
     /// 网关入口：未登录 = 3099 登录页；已登录 = 3099/app。app-url.txt 是带 token 的 3092 地址。
@@ -208,20 +223,32 @@ final class NodeRuntime {
                 parts.append("【dsh.log 尾部】\n" + text)
             }
         }
-        return parts.isEmpty ? "没有拿到任何日志：可能是内嵌 Node 启动即崩溃" : parts.joined(separator: "\n\n")
+        let text = parts.isEmpty ? "没有拿到任何日志：可能是内嵌 Node 启动即崩溃" : parts.joined(separator: "\n\n")
+        try? text.write(to: NodeRuntime.documentsLog("diagnostics.txt"), atomically: true, encoding: .utf8)
+        return text
     }
 
-    /// 原生侧启动轨迹；闪退时用来判断卡在哪一步（Node 自己的输出在 dsh.log）
+    /// 原生侧启动轨迹；闪退时用来判断卡在哪一步（Node 自己的输出在 dsh.log）。
+    /// 同时写一份到 Documents/xiaobai-log，用户可以在「文件」App 里直接取出来发给我们。
     func bootTrace(_ message: String) {
-        let f = installRoot.appendingPathComponent("boot-trace.txt")
         guard let data = "\(Date()) \(message)\n".data(using: .utf8) else { return }
-        if let handle = try? FileHandle(forWritingTo: f) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: f)
+        for f in [installRoot.appendingPathComponent("boot-trace.txt"), NodeRuntime.documentsLog("boot-trace.txt")] {
+            if let handle = try? FileHandle(forWritingTo: f) {
+                defer { try? handle.close() }
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+            } else {
+                try? data.write(to: f)
+            }
         }
+    }
+
+    /// Documents/xiaobai-log/<name>（配合 Info.plist 的 UIFileSharingEnabled，可在「文件」App 里看到）
+    static func documentsLog(_ name: String) -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("xiaobai-log", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(name)
     }
 
     private func excludeFromBackup(_ url: URL) {

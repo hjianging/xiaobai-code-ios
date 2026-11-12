@@ -127,15 +127,18 @@ final class RootViewController: UIViewController, WKNavigationDelegate, WKUIDele
     // MARK: - Boot
 
     private func boot() {
+        NodeRuntime.shared.bootTrace("app: boot")
         DispatchQueue.global(qos: .userInitiated).async {
             let error = NodeRuntime.shared.prepare { text in
                 DispatchQueue.main.async { self.statusLabel.text = text }
             }
             DispatchQueue.main.async {
                 if let error = error {
+                    NodeRuntime.shared.bootTrace("app: prepare failed")
                     self.showFatal(error)
                     return
                 }
+                NodeRuntime.shared.bootTrace("app: prepare ok, starting node")
                 self.statusLabel.text = "正在启动本地服务（DSH + 网关）…"
                 NodeRuntime.shared.start()
                 self.startPolling(limit: 90)
