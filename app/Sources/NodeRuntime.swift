@@ -57,6 +57,7 @@ final class NodeRuntime {
             excludeFromBackup(installRoot)
 
             let version = seedVersion() ?? "unknown"
+            bootTrace("prepare: bundle=\(version)")
             let marker = bundleRoot.appendingPathComponent(".bundle-id")
             let installed = (try? String(contentsOf: marker, encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -99,7 +100,9 @@ final class NodeRuntime {
             try fm.createDirectory(at: home, withIntermediateDirectories: true)
 
             try? version.write(to: marker, atomically: true, encoding: .utf8)
+            bootTrace("prepare: ok")
         } catch {
+            bootTrace("prepare: failed \(error.localizedDescription)")
             return "准备运行时失败：\(error.localizedDescription)"
         }
         return nil
@@ -133,10 +136,14 @@ final class NodeRuntime {
             freopen(logPath, "a+", stdout)
             freopen(logPath, "a+", stderr)
 
-            let args = ["node", "--expose-internals", entry]
+            // iOS 不允许申请可执行内存，V8 必须 --jitless（少了这个参数就是「打开就闪退」）
+            let args = ["node", "--expose-internals", "--jitless", entry]
             var cArgs: [UnsafeMutablePointer<CChar>?] = args.map { strdup($0) }
-            _ = xiaobai_node_start(Int32(cArgs.count), &cArgs)
-            for pointer in cArgs { free(pointer) }
+            cArgs.append(nil)                       // argv 必须以 NULL 结尾
+            bootTrace("node start: \(args.joined(separator: " "))")
+            let code = xiaobai_node_start(Int32(args.count), &cArgs)
+            bootTrace("node exited: \(code)")
+            for pointer in cArgs where pointer != nil { free(pointer) }
         }
     }
 
@@ -202,6 +209,19 @@ final class NodeRuntime {
             }
         }
         return parts.isEmpty ? "没有拿到任何日志：可能是内嵌 Node 启动即崩溃" : parts.joined(separator: "\n\n")
+    }
+
+    /// 原生侧启动轨迹；闪退时用来判断卡在哪一步（Node 自己的输出在 dsh.log）
+    func bootTrace(_ message: String) {
+        let f = installRoot.appendingPathComponent("boot-trace.txt")
+        guard let data = "\(Date()) \(message)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: f) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: f)
+        }
     }
 
     private func excludeFromBackup(_ url: URL) {
